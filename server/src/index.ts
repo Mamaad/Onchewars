@@ -8,8 +8,8 @@ import { User } from "./entity/User";
 // Pas besoin de import.meta.url
 
 const app = express();
-// PORT INTERNE : 3000 (Nginx écoutera le 1000 et redirigera ici)
-const PORT = 3000;
+// PORT INTERNE : 2000 (Pour éviter conflit avec 3000)
+const PORT = 2000;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }) as any);
@@ -136,6 +136,7 @@ AppDataSource.initialize().then(async () => {
         res.sendFile(path.join(__dirname, '../../client/dist/index.html'));
     });
 
+    // Ecoute sur 127.0.0.1 (Localhost uniquement) sur le port 2000
     app.listen(PORT, "127.0.0.1", () => {
         console.log(`Server started internally on port ${PORT}`);
     });
