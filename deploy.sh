@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- CONFIGURATION ---
-REPO_URL="https://github.com/Mamaad/Onche-wars"
+REPO_URL="https://github.com/Mamaad/Onchewars"
 APP_DIR="/var/www/onchewars"
 DB_NAME="onchewars_db"
 DB_USER="onchewars_user"
