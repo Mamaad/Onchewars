@@ -1,12 +1,11 @@
 import express from "express";
 import cors from "cors";
 import path from "path";
-import { fileURLToPath } from "url";
 import { AppDataSource } from "./data-source";
 import { User } from "./entity/User";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// En CommonJS (Node standard), __dirname est disponible globalement
+// Pas besoin de import.meta.url
 
 const app = express();
 // PORT INTERNE : 3000 (Nginx écoutera le 1000 et redirigera ici)
