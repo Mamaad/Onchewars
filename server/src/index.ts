@@ -4,28 +4,44 @@ import path from "path";
 import { AppDataSource } from "./data-source";
 import { User } from "./entity/User";
 
-// En CommonJS (Node standard), __dirname est disponible globalement
-// Pas besoin de import.meta.url
-
 const app = express();
-// PORT INTERNE : 2000 (Pour éviter conflit avec 3000)
 const PORT = 2000;
 
-app.use(cors());
+// Augmentation de la limite pour les images base64
 app.use(express.json({ limit: '50mb' }) as any);
+app.use(cors());
+
+// Route de santé pour vérifier que le serveur tourne (même sans DB)
+app.get('/api/health', (req, res) => res.send('Online'));
 
 // --- STATIC FILES (Frontend) ---
+// On sert le dossier dist du client
 app.use(express.static(path.join(__dirname, '../../client/dist')) as any);
 
+// Variable globale pour le repository (initialisée après connexion DB)
+let userRepo: any = null;
+
+// Initialisation Base de Données
 AppDataSource.initialize().then(async () => {
-    console.log("Database connected.");
+    console.log("✅ Database connected successfully.");
+    userRepo = AppDataSource.getRepository(User);
+}).catch(error => {
+    console.error("❌ Database connection failed:", error);
+});
 
-    const userRepo = AppDataSource.getRepository(User);
+// Middleware pour vérifier la DB avant chaque requête API
+const checkDb = (req: any, res: any, next: any) => {
+    if (!userRepo) {
+        return res.status(503).json({ message: "Le serveur démarre ou la base de données est inaccessible." });
+    }
+    next();
+};
 
-    // --- API ROUTES ---
+// --- API ROUTES ---
 
-    // Register
-    app.post("/api/auth/register", async (req, res) => {
+// Register
+app.post("/api/auth/register", checkDb, async (req, res) => {
+    try {
         const { username, password, email, initialPlanet } = req.body;
         
         const existing = await userRepo.findOneBy({ username });
@@ -37,7 +53,6 @@ AppDataSource.initialize().then(async () => {
         newUser.email = email;
         newUser.isAdmin = username.toLowerCase() === 'admin';
         
-        // Init Game State
         newUser.planets = [initialPlanet];
         newUser.currentPlanetId = initialPlanet.id; 
         newUser.research = []; 
@@ -53,10 +68,15 @@ AppDataSource.initialize().then(async () => {
         
         const { password: _, ...userNoPass } = newUser;
         res.json({ success: true, user: { ...userNoPass, id: newUser.id }, token: newUser.id });
-    });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ message: "Erreur serveur" });
+    }
+});
 
-    // Login
-    app.post("/api/auth/login", async (req, res) => {
+// Login
+app.post("/api/auth/login", checkDb, async (req, res) => {
+    try {
         const { username, password } = req.body;
         const user = await userRepo.findOneBy({ username });
 
@@ -66,24 +86,29 @@ AppDataSource.initialize().then(async () => {
 
         const { password: _, ...userNoPass } = user;
         res.json({ success: true, user: { ...userNoPass, id: user.id }, token: user.id });
-    });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ message: "Erreur serveur" });
+    }
+});
 
-    // Get State
-    app.get("/api/game/state", async (req, res) => {
-        const id = req.headers['authorization'];
-        if (!id) return res.status(401).send();
+// Get State
+app.get("/api/game/state", checkDb, async (req, res) => {
+    const id = req.headers['authorization'];
+    if (!id) return res.status(401).send();
 
-        const user = await userRepo.findOneBy({ id });
-        if (!user) return res.status(404).send();
+    const user = await userRepo.findOneBy({ id });
+    if (!user) return res.status(404).send();
 
-        const { password: _, ...userNoPass } = user;
-        if(!userNoPass.planets) userNoPass.planets = [];
-        
-        res.json({ user: { ...userNoPass, currentPlanetId: userNoPass.planets[0]?.id } });
-    });
+    const { password: _, ...userNoPass } = user;
+    if(!userNoPass.planets) userNoPass.planets = [];
+    
+    res.json({ user: { ...userNoPass, currentPlanetId: userNoPass.planets[0]?.id } });
+});
 
-    // Save State
-    app.post("/api/game/sync", async (req, res) => {
+// Save State
+app.post("/api/game/sync", checkDb, async (req, res) => {
+    try {
         const id = req.headers['authorization'];
         if (!id) return res.status(401).send();
 
@@ -91,6 +116,7 @@ AppDataSource.initialize().then(async () => {
         if (!user) return res.status(404).send();
 
         const body = req.body;
+        // Mise à jour de tous les champs
         user.planets = body.planets;
         user.resources = body.resources;
         user.research = body.research;
@@ -113,32 +139,39 @@ AppDataSource.initialize().then(async () => {
 
         await userRepo.save(user);
         res.json({ success: true });
-    });
+    } catch (e) {
+        console.error("Sync error:", e);
+        res.status(500).json({ success: false });
+    }
+});
 
-    // Highscores
-    app.get("/api/highscores", async (req, res) => {
+// Highscores
+app.get("/api/highscores", checkDb, async (req, res) => {
+    try {
         const users = await userRepo.find({
             select: ["id", "username", "points", "allianceId", "isAdmin"],
             take: 100
         });
-        users.sort((a, b) => (b.points?.total || 0) - (a.points?.total || 0));
+        users.sort((a: any, b: any) => (b.points?.total || 0) - (a.points?.total || 0));
         res.json(users);
-    });
+    } catch (e) {
+        res.json([]);
+    }
+});
 
-    // Fallbacks
-    app.get("/api/galaxy", (req, res) => res.json({}));
-    app.get("/api/alliance", (req, res) => res.json([]));
-    app.get("/api/market", (req, res) => res.json([]));
-    app.get("/api/chat", (req, res) => res.json([]));
+// Fallbacks (Mock endpoints pour éviter 404 sur fonctionnalités futures)
+app.get("/api/galaxy", (req, res) => res.json({}));
+app.get("/api/alliance", (req, res) => res.json([]));
+app.get("/api/market", (req, res) => res.json([]));
+app.get("/api/chat", (req, res) => res.json([]));
 
-    // React Routing (SPA)
-    app.get('*', (req, res) => {
-        res.sendFile(path.join(__dirname, '../../client/dist/index.html'));
-    });
+// React Routing (SPA) - Doit être en dernier
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../../client/dist/index.html'));
+});
 
-    // Ecoute sur 127.0.0.1 (Localhost uniquement) sur le port 2000
-    app.listen(PORT, "127.0.0.1", () => {
-        console.log(`Server started internally on port ${PORT}`);
-    });
-
-}).catch(error => console.log(error));
+// Démarrage du serveur INDÉPENDAMMENT de la DB
+// On écoute sur 0.0.0.0 pour être sûr que Nginx puisse se connecter via 127.0.0.1 ou l'IP locale
+app.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 Server started on port ${PORT}`);
+});
